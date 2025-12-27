@@ -92,7 +92,16 @@ void search_memory(uint8_t* pattern, size_t pattern_len) {
         }
 
         if(match) {
-            printf("FOUND: 0x%08x\n", start_addr + offset);
+            uint32_t found_addr = start_addr + offset;
+            printf("FOUND: 0x%08x", found_addr);
+
+            // Check if this might be self-referential (found in command buffer area)
+            // Command buffer is typically near end of SRAM
+            if(found_addr >= 0x20081f00 && found_addr <= 0x20081fff) {
+                printf(" (Maybe Self-Referential - command buffer)");
+            }
+
+            printf("\n");
             found_count++;
             fflush(stdout);
 
@@ -102,13 +111,6 @@ void search_memory(uint8_t* pattern, size_t pattern_len) {
                 fflush(stdout);
                 break;
             }
-        }
-
-        // Send progress update every 64KB to show we're still alive
-        if((offset % 65536) == 0 && offset > 0) {
-            printf("PROGRESS: Searched %u / %u bytes (%.1f%%)\n",
-                   offset, total_size, (offset * 100.0) / total_size);
-            fflush(stdout);
         }
     }
 
@@ -206,11 +208,19 @@ void parse_command(char* cmd) {
         return;
     }
 
-    // Validate address range - updated for 520KB SRAM and ROM
-    if(!((address >= 0x00000000 && address < 0x00004000) ||  // ROM - 16KB
-         (address >= 0x10000000 && address < 0x10400000) ||  // Flash
-         (address >= 0x20000000 && address < 0x20082000) ||  // SRAM - 520KB
-         (address >= 0x40000000 && address < 0x60000000))) {  // Peripherals
+    // Validate address range and clamp length to prevent reading past boundaries
+    uint32_t max_length = length;
+    uint32_t region_end = 0;
+
+    if(address >= 0x00000000 && address < 0x00004000) {  // ROM - 16KB
+        region_end = 0x00004000;
+    } else if(address >= 0x10000000 && address < 0x10400000) {  // Flash
+        region_end = 0x10400000;
+    } else if(address >= 0x20000000 && address < 0x20082000) {  // SRAM - 520KB
+        region_end = 0x20082000;
+    } else if(address >= 0x40000000 && address < 0x60000000) {  // Peripherals
+        region_end = 0x60000000;
+    } else {
         printf("ERROR: Address out of valid range\n");
         printf("Valid ranges:\n");
         printf("  ROM:         0x00000000-0x00003FFF\n");
@@ -221,7 +231,15 @@ void parse_command(char* cmd) {
         return;
     }
 
-    send_hex_dump(address, length);
+    // Clamp length to not exceed region boundary
+    if(address + length > region_end) {
+        max_length = region_end - address;
+        printf("WARNING: Length clamped from %u to %u bytes to stay within region bounds\n",
+               length, max_length);
+        fflush(stdout);
+    }
+
+    send_hex_dump(address, max_length);
 }
 
 int main() {

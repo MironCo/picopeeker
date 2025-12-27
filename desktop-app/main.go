@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,33 +12,45 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"go.bug.st/serial"
 )
 
 var landmarksLabel *widget.Label
 
+
+// findUSBModemPort scans for /dev/tty.usbmodem* devices
+func findUSBModemPort() string {
+	matches, err := filepath.Glob("/dev/tty.usbmodem*")
+	if err != nil || len(matches) == 0 {
+		return "/dev/tty.usbmodem2101" // fallback default
+	}
+	return matches[0] // return first match
+}
+
 func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("PicoPeeker")
 
-	// Output label - monospace for hex dump
-	output := widget.NewLabel("")
+	// Output entry - monospace, read-only, but selectable for copy-paste
+	output := widget.NewMultiLineEntry()
 	output.Wrapping = fyne.TextWrapOff
 	output.TextStyle = fyne.TextStyle{Monospace: true}
+	// Don't disable - just make it read-only by handling key events
+	// This keeps text dark and readable while still being selectable
 
 	// Port input (shared across tabs)
 	portEntry := widget.NewEntry()
-	portEntry.SetPlaceHolder("/dev/tty.usbmodem101")
-	portEntry.SetText("/dev/tty.usbmodem101")
+	defaultPort := findUSBModemPort()
+	portEntry.SetPlaceHolder(defaultPort)
+	portEntry.SetText(defaultPort)
 
 	// Landmarks label (shared across tabs)
 	landmarksLabel = widget.NewLabel("Landmarks: Not connected")
 	landmarksLabel.TextStyle = fyne.TextStyle{Monospace: true}
 
 	// Connect button (shared)
-	connectBtn := widget.NewButton("Connect & Get Landmarks", func() {
+	connectBtn := widget.NewButton("Get Landmarks", func() {
 		portName := portEntry.Text
 		if portName == "" {
 			output.SetText("Error: Please enter a port name")
@@ -85,6 +98,23 @@ func main() {
 	lengthEntry.SetPlaceHolder("256")
 	lengthEntry.SetText("256")
 
+	// Channel for background operations
+	type uiUpdate struct {
+		text string
+	}
+	updateChan := make(chan uiUpdate, 10)
+
+	// Goroutine to handle UI updates on main thread
+	go func() {
+		for update := range updateChan {
+			// Must use fyne.Do to safely update UI from goroutine
+			text := update.text
+			fyne.Do(func() {
+				output.SetText(text)
+			})
+		}
+	}()
+
 	readMemoryBtn := widget.NewButton("Read Memory", func() {
 		portName := portEntry.Text
 		address := addressEntry.Text
@@ -103,89 +133,109 @@ func main() {
 			return
 		}
 
-		output.SetText("Reading memory...")
-
-		result, err := readMemory(portName, address, length)
-		if err != nil {
-			output.SetText(fmt.Sprintf("Error: %v", err))
+		// Validate address format (must be hex)
+		address = strings.TrimSpace(address)
+		if !strings.HasPrefix(address, "0x") && !strings.HasPrefix(address, "0X") {
+			output.SetText("Error: Address must start with 0x (e.g., 0x20000000)")
+			return
+		}
+		if _, err := strconv.ParseUint(address[2:], 16, 32); err != nil {
+			output.SetText("Error: Invalid hex address. Use format like 0x20000000")
 			return
 		}
 
-		output.SetText(result)
+		// Validate length (must be a positive integer)
+		lengthVal, err := strconv.Atoi(length)
+		if err != nil || lengthVal <= 0 || lengthVal > 4096 {
+			output.SetText("Error: Length must be a number between 1 and 4096")
+			return
+		}
+
+		output.SetText("Reading memory...")
+
+		// Run read in background goroutine to keep UI responsive
+		go func() {
+			result, err := readMemory(portName, address, length)
+			if err != nil {
+				updateChan <- uiUpdate{text: fmt.Sprintf("Error: %v", err)}
+			} else {
+				updateChan <- uiUpdate{text: result}
+			}
+		}()
 	})
 	readMemoryBtn.Importance = widget.HighImportance
 
-	sramBtn := widget.NewButton("SRAM", func() {
-		addressEntry.SetText("0x20000000")
+	romBtn := widget.NewButton("ROM", func() {
+		addressEntry.SetText("0x00000000")
 	})
 	flashBtn := widget.NewButton("Flash", func() {
 		addressEntry.SetText("0x10000000")
 	})
+	sramBtn := widget.NewButton("SRAM", func() {
+		addressEntry.SetText("0x20000000")
+	})
 	gpioBtn := widget.NewButton("GPIO", func() {
 		addressEntry.SetText("0x40028000")
 	})
-	romBtn := widget.NewButton("ROM", func() {
-		addressEntry.SetText("0x00000000")
-	})
 
-	dumpRomBtn := widget.NewButton("Dump ROM to File (16KB)", func() {
-		portName := portEntry.Text
-		if portName == "" {
-			output.SetText("Error: Please enter a port name")
-			return
-		}
+	// dumpRomBtn := widget.NewButton("Dump ROM to File (16KB)", func() {
+	// 	portName := portEntry.Text
+	// 	if portName == "" {
+	// 		output.SetText("Error: Please enter a port name")
+	// 		return
+	// 	}
 
-		output.SetText("Dumping 16KB ROM... This will take ~5 seconds...")
+	// 	output.SetText("Dumping 16KB ROM... This will take ~5 seconds...")
 
-		// Show file save dialog
-		saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
-			if err != nil {
-				output.SetText(fmt.Sprintf("Error: %v", err))
-				return
-			}
-			if writer == nil {
-				output.SetText("Save cancelled")
-				return
-			}
-			defer writer.Close()
+	// 	// Show file save dialog
+	// 	saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+	// 		if err != nil {
+	// 			output.SetText(fmt.Sprintf("Error: %v", err))
+	// 			return
+	// 		}
+	// 		if writer == nil {
+	// 			output.SetText("Save cancelled")
+	// 			return
+	// 		}
+	// 		defer writer.Close()
 
-			// Dump ROM in 4KB chunks (max size per READ is 4096)
-			romData := make([]byte, 0, 16384)
-			for offset := uint32(0); offset < 0x4000; offset += 4096 {
-				address := fmt.Sprintf("0x%08x", offset)
-				result, err := readMemory(portName, address, "4096")
-				if err != nil {
-					output.SetText(fmt.Sprintf("Error reading ROM at offset 0x%x: %v", offset, err))
-					return
-				}
+	// 		// Dump ROM in 4KB chunks (max size per READ is 4096)
+	// 		romData := make([]byte, 0, 16384)
+	// 		for offset := uint32(0); offset < 0x4000; offset += 4096 {
+	// 			address := fmt.Sprintf("0x%08x", offset)
+	// 			result, err := readMemory(portName, address, "4096")
+	// 			if err != nil {
+	// 				output.SetText(fmt.Sprintf("Error reading ROM at offset 0x%x: %v", offset, err))
+	// 				return
+	// 			}
 
-				// Parse hex dump and extract bytes
-				bytes := parseHexDump(result)
-				if len(bytes) == 0 {
-					output.SetText(fmt.Sprintf("Error: Failed to parse hex dump at offset 0x%x", offset))
-					return
-				}
-				romData = append(romData, bytes...)
+	// 			// Parse hex dump and extract bytes
+	// 			bytes := parseHexDump(result)
+	// 			if len(bytes) == 0 {
+	// 				output.SetText(fmt.Sprintf("Error: Failed to parse hex dump at offset 0x%x", offset))
+	// 				return
+	// 			}
+	// 			romData = append(romData, bytes...)
 
-				output.SetText(fmt.Sprintf("Dumping ROM... %d / 16384 bytes (%.1f%%)",
-					len(romData), float64(len(romData))*100.0/16384.0))
-			}
+	// 			output.SetText(fmt.Sprintf("Dumping ROM... %d / 16384 bytes (%.1f%%)",
+	// 				len(romData), float64(len(romData))*100.0/16384.0))
+	// 		}
 
-			// Write to file
-			_, err = writer.Write(romData)
-			if err != nil {
-				output.SetText(fmt.Sprintf("Error writing file: %v", err))
-				return
-			}
+	// 		// Write to file
+	// 		_, err = writer.Write(romData)
+	// 		if err != nil {
+	// 			output.SetText(fmt.Sprintf("Error writing file: %v", err))
+	// 			return
+	// 		}
 
-			output.SetText(fmt.Sprintf("SUCCESS! Dumped %d bytes of ROM to %s\nHappy reverse engineering! 😎",
-				len(romData), writer.URI().Name()))
-		}, myWindow)
+	// 		output.SetText(fmt.Sprintf("SUCCESS! Dumped %d bytes of ROM to %s\nHappy reverse engineering! 😎",
+	// 			len(romData), writer.URI().Name()))
+	// 	}, myWindow)
 
-		saveDialog.SetFileName("rp2350_rom.bin")
-		saveDialog.Show()
-	})
-	dumpRomBtn.Importance = widget.WarningImportance
+	// 	saveDialog.SetFileName("rp2350_rom.bin")
+	// 	saveDialog.Show()
+	// })
+	// dumpRomBtn.Importance = widget.WarningImportance
 
 	addressRow := container.NewBorder(nil, nil, widget.NewLabel("Address:"), container.NewHBox(decrementBtn, incrementBtn), addressEntry)
 	lengthRow := container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, lengthEntry)
@@ -193,8 +243,8 @@ func main() {
 	readTab := container.NewVBox(
 		addressRow,
 		lengthRow,
-		container.NewHBox(widget.NewLabel("Quick:"), romBtn, sramBtn, flashBtn, gpioBtn),
-		dumpRomBtn,
+		container.NewHBox(widget.NewLabel("Quick:"), romBtn, flashBtn, sramBtn, gpioBtn),
+		// dumpRomBtn,
 		readMemoryBtn,
 	)
 
@@ -233,8 +283,28 @@ func main() {
 		hexPattern := ""
 		switch searchType {
 		case "Hex Bytes":
-			hexPattern = pattern
+			// Validate hex bytes - remove spaces and check if valid hex
+			hexPattern = strings.ReplaceAll(strings.ToUpper(pattern), " ", "")
+			if len(hexPattern)%2 != 0 {
+				output.SetText("Error: Hex pattern must have even number of characters (e.g., DEADBEEF)")
+				return
+			}
+			if len(hexPattern) == 0 {
+				output.SetText("Error: Hex pattern cannot be empty")
+				return
+			}
+			// Check if all characters are valid hex
+			for _, c := range hexPattern {
+				if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+					output.SetText("Error: Invalid hex pattern. Use only 0-9 and A-F (e.g., DEADBEEF)")
+					return
+				}
+			}
 		case "ASCII String":
+			if pattern == "" {
+				output.SetText("Error: ASCII string cannot be empty")
+				return
+			}
 			hexPattern = stringToHex(pattern)
 		case "32-bit Int (LE)":
 			val, err := strconv.ParseInt(pattern, 10, 32)
@@ -247,13 +317,15 @@ func main() {
 
 		output.SetText("Searching SRAM (this may take 5-10 seconds)...")
 
-		result, err := searchMemory(portName, hexPattern)
-		if err != nil {
-			output.SetText(fmt.Sprintf("Error: %v", err))
-			return
-		}
-
-		output.SetText(result)
+		// Run search in background goroutine to keep UI responsive
+		go func() {
+			result, err := searchMemory(portName, hexPattern)
+			if err != nil {
+				updateChan <- uiUpdate{text: fmt.Sprintf("Error: %v", err)}
+			} else {
+				updateChan <- uiUpdate{text: result}
+			}
+		}()
 	})
 	searchMemoryBtn.Importance = widget.HighImportance
 
@@ -263,7 +335,7 @@ func main() {
 	searchTab := container.NewVBox(
 		searchTypeRow,
 		searchPatternRow,
-		widget.NewLabel("Searches all 520KB of SRAM for the pattern"),
+		container.NewHBox(widget.NewLabel("Searches all 520KB of SRAM for the pattern")),
 		searchMemoryBtn,
 	)
 
@@ -427,6 +499,12 @@ func readMemory(portName, address, length string) (string, error) {
 	}
 	defer port.Close()
 
+	// Clear any buffered data before sending command
+	time.Sleep(100 * time.Millisecond)
+	clearBuf := make([]byte, 4096)
+	port.SetReadTimeout(50 * time.Millisecond)
+	port.Read(clearBuf) // Discard any leftover data
+
 	// Send command
 	command := fmt.Sprintf("READ:%s:%s\n", address, length)
 	_, err = port.Write([]byte(command))
@@ -472,6 +550,12 @@ func searchMemory(portName, pattern string) (string, error) {
 		return "", fmt.Errorf("failed to open port: %w", err)
 	}
 	defer port.Close()
+
+	// Clear any buffered data before sending command
+	time.Sleep(100 * time.Millisecond)
+	clearBuf := make([]byte, 4096)
+	port.SetReadTimeout(50 * time.Millisecond)
+	port.Read(clearBuf) // Discard any leftover data
 
 	// Send command
 	command := fmt.Sprintf("SEARCH:%s\n", pattern)
