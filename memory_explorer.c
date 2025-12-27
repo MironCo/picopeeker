@@ -206,12 +206,14 @@ void parse_command(char* cmd) {
         return;
     }
 
-    // Validate address range - updated for 520KB SRAM
-    if(!((address >= 0x10000000 && address < 0x10400000) ||  // Flash
+    // Validate address range - updated for 520KB SRAM and ROM
+    if(!((address >= 0x00000000 && address < 0x00004000) ||  // ROM - 16KB
+         (address >= 0x10000000 && address < 0x10400000) ||  // Flash
          (address >= 0x20000000 && address < 0x20082000) ||  // SRAM - 520KB
          (address >= 0x40000000 && address < 0x60000000))) {  // Peripherals
         printf("ERROR: Address out of valid range\n");
         printf("Valid ranges:\n");
+        printf("  ROM:         0x00000000-0x00003FFF\n");
         printf("  Flash:       0x10000000-0x103FFFFF\n");
         printf("  SRAM:        0x20000000-0x20081FFF\n");
         printf("  Peripherals: 0x40000000-0x5FFFFFFF\n");

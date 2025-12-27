@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"go.bug.st/serial"
 )
@@ -123,6 +124,68 @@ func main() {
 	gpioBtn := widget.NewButton("GPIO", func() {
 		addressEntry.SetText("0x40028000")
 	})
+	romBtn := widget.NewButton("ROM", func() {
+		addressEntry.SetText("0x00000000")
+	})
+
+	dumpRomBtn := widget.NewButton("Dump ROM to File (16KB)", func() {
+		portName := portEntry.Text
+		if portName == "" {
+			output.SetText("Error: Please enter a port name")
+			return
+		}
+
+		output.SetText("Dumping 16KB ROM... This will take ~5 seconds...")
+
+		// Show file save dialog
+		saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				output.SetText(fmt.Sprintf("Error: %v", err))
+				return
+			}
+			if writer == nil {
+				output.SetText("Save cancelled")
+				return
+			}
+			defer writer.Close()
+
+			// Dump ROM in 4KB chunks (max size per READ is 4096)
+			romData := make([]byte, 0, 16384)
+			for offset := uint32(0); offset < 0x4000; offset += 4096 {
+				address := fmt.Sprintf("0x%08x", offset)
+				result, err := readMemory(portName, address, "4096")
+				if err != nil {
+					output.SetText(fmt.Sprintf("Error reading ROM at offset 0x%x: %v", offset, err))
+					return
+				}
+
+				// Parse hex dump and extract bytes
+				bytes := parseHexDump(result)
+				if len(bytes) == 0 {
+					output.SetText(fmt.Sprintf("Error: Failed to parse hex dump at offset 0x%x", offset))
+					return
+				}
+				romData = append(romData, bytes...)
+
+				output.SetText(fmt.Sprintf("Dumping ROM... %d / 16384 bytes (%.1f%%)",
+					len(romData), float64(len(romData))*100.0/16384.0))
+			}
+
+			// Write to file
+			_, err = writer.Write(romData)
+			if err != nil {
+				output.SetText(fmt.Sprintf("Error writing file: %v", err))
+				return
+			}
+
+			output.SetText(fmt.Sprintf("SUCCESS! Dumped %d bytes of ROM to %s\nHappy reverse engineering! 😎",
+				len(romData), writer.URI().Name()))
+		}, myWindow)
+
+		saveDialog.SetFileName("rp2350_rom.bin")
+		saveDialog.Show()
+	})
+	dumpRomBtn.Importance = widget.WarningImportance
 
 	addressRow := container.NewBorder(nil, nil, widget.NewLabel("Address:"), container.NewHBox(decrementBtn, incrementBtn), addressEntry)
 	lengthRow := container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, lengthEntry)
@@ -130,7 +193,8 @@ func main() {
 	readTab := container.NewVBox(
 		addressRow,
 		lengthRow,
-		container.NewHBox(widget.NewLabel("Quick:"), sramBtn, flashBtn, gpioBtn),
+		container.NewHBox(widget.NewLabel("Quick:"), romBtn, sramBtn, flashBtn, gpioBtn),
+		dumpRomBtn,
 		readMemoryBtn,
 	)
 
@@ -239,6 +303,45 @@ func int32ToHexLE(val int32) string {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, uint32(val))
 	return fmt.Sprintf("%02X%02X%02X%02X", buf[0], buf[1], buf[2], buf[3])
+}
+
+// Parse hex dump output and extract raw bytes
+func parseHexDump(dump string) []byte {
+	var result []byte
+	lines := strings.Split(dump, "\n")
+
+	for _, line := range lines {
+		// Look for lines with hex dump format: "00000000: 01 02 03 04 ..."
+		if !strings.Contains(line, ":") {
+			continue
+		}
+
+		// Split on colon
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		// Extract hex bytes (before the ASCII section)
+		hexPart := parts[1]
+		// Remove ASCII part (after double space)
+		if idx := strings.Index(hexPart, "  "); idx != -1 {
+			hexPart = hexPart[:idx]
+		}
+
+		// Parse hex bytes
+		hexBytes := strings.Fields(hexPart)
+		for _, hexByte := range hexBytes {
+			if len(hexByte) == 2 {
+				val, err := strconv.ParseUint(hexByte, 16, 8)
+				if err == nil {
+					result = append(result, byte(val))
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 func fetchLandmarks(portName string) (string, error) {
