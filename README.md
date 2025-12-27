@@ -107,7 +107,3 @@ The Pico firmware accepts these serial commands:
 ## License
 
 MIT
-
-## Author
-
-Built with Claude Code
