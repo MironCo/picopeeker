@@ -265,18 +265,16 @@ func main() {
 	})
 	searchTypeSelect.SetSelected("Hex Bytes")
 
-	searchMemoryBtn := widget.NewButton("Search SRAM", func() {
-		portName := portEntry.Text
+	searchRegionSelect := widget.NewSelect([]string{"SRAM", "Flash"}, nil)
+	searchRegionSelect.SetSelected("SRAM")
+
+	// Helper function to validate and convert search pattern
+	validateAndConvertPattern := func() (string, error) {
 		pattern := searchEntry.Text
 		searchType := searchTypeSelect.Selected
 
-		if portName == "" {
-			output.SetText("Error: Please enter a port name")
-			return
-		}
 		if pattern == "" {
-			output.SetText("Error: Please enter a search pattern")
-			return
+			return "", fmt.Errorf("Please enter a search pattern")
 		}
 
 		// Convert pattern to hex based on type
@@ -286,40 +284,60 @@ func main() {
 			// Validate hex bytes - remove spaces and check if valid hex
 			hexPattern = strings.ReplaceAll(strings.ToUpper(pattern), " ", "")
 			if len(hexPattern)%2 != 0 {
-				output.SetText("Error: Hex pattern must have even number of characters (e.g., DEADBEEF)")
-				return
+				return "", fmt.Errorf("Hex pattern must have even number of characters (e.g., DEADBEEF)")
 			}
 			if len(hexPattern) == 0 {
-				output.SetText("Error: Hex pattern cannot be empty")
-				return
+				return "", fmt.Errorf("Hex pattern cannot be empty")
 			}
 			// Check if all characters are valid hex
 			for _, c := range hexPattern {
 				if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
-					output.SetText("Error: Invalid hex pattern. Use only 0-9 and A-F (e.g., DEADBEEF)")
-					return
+					return "", fmt.Errorf("Invalid hex pattern. Use only 0-9 and A-F (e.g., DEADBEEF)")
 				}
 			}
 		case "ASCII String":
 			if pattern == "" {
-				output.SetText("Error: ASCII string cannot be empty")
-				return
+				return "", fmt.Errorf("ASCII string cannot be empty")
 			}
 			hexPattern = stringToHex(pattern)
 		case "32-bit Int (LE)":
 			val, err := strconv.ParseInt(pattern, 10, 32)
 			if err != nil {
-				output.SetText(fmt.Sprintf("Error: Invalid integer: %v", err))
-				return
+				return "", fmt.Errorf("Invalid integer: %v", err)
 			}
 			hexPattern = int32ToHexLE(int32(val))
 		}
+		return hexPattern, nil
+	}
 
-		output.SetText("Searching SRAM (this may take 5-10 seconds)...")
+	searchBtn := widget.NewButton("Search Memory", func() {
+		portName := portEntry.Text
+		if portName == "" {
+			output.SetText("Error: Please enter a port name")
+			return
+		}
+
+		hexPattern, err := validateAndConvertPattern()
+		if err != nil {
+			output.SetText(fmt.Sprintf("Error: %v", err))
+			return
+		}
+
+		region := searchRegionSelect.Selected
 
 		// Run search in background goroutine to keep UI responsive
 		go func() {
-			result, err := searchMemory(portName, hexPattern)
+			var result string
+			var err error
+
+			if region == "SRAM" {
+				updateChan <- uiUpdate{text: "Searching SRAM (this may take 5-10 seconds)..."}
+				result, err = searchMemory(portName, hexPattern)
+			} else { // Flash
+				updateChan <- uiUpdate{text: "Searching Flash (this may take 30-60 seconds for 4MB)..."}
+				result, err = searchFlash(portName, hexPattern)
+			}
+
 			if err != nil {
 				updateChan <- uiUpdate{text: fmt.Sprintf("Error: %v", err)}
 			} else {
@@ -327,16 +345,18 @@ func main() {
 			}
 		}()
 	})
-	searchMemoryBtn.Importance = widget.HighImportance
+	searchBtn.Importance = widget.HighImportance
 
 	searchTypeRow := container.NewBorder(nil, nil, widget.NewLabel("Search Type:"), nil, searchTypeSelect)
 	searchPatternRow := container.NewBorder(nil, nil, widget.NewLabel("Pattern:"), nil, searchEntry)
+	searchRegionRow := container.NewBorder(nil, nil, widget.NewLabel("Region:"), nil, searchRegionSelect)
 
 	searchTab := container.NewVBox(
 		searchTypeRow,
 		searchPatternRow,
-		container.NewHBox(widget.NewLabel("Searches all 520KB of SRAM for the pattern")),
-		searchMemoryBtn,
+		searchRegionRow,
+		widget.NewLabel("SRAM: Runtime data (520KB) | Flash: String literals (4MB)"),
+		searchBtn,
 	)
 
 	// Create tabs
@@ -573,6 +593,59 @@ func searchMemory(portName, pattern string) (string, error) {
 	for {
 		// Timeout after 30 seconds (search can be slow)
 		if time.Since(startTime) > 30*time.Second {
+			if result == "" {
+				return "", fmt.Errorf("timeout: no response from Pico")
+			}
+			return result, nil
+		}
+
+		port.SetReadTimeout(100 * time.Millisecond)
+		n, _ := port.Read(buf)
+
+		if n > 0 {
+			result += string(buf[:n])
+
+			// Check if we got the end marker
+			if strings.Contains(result, "===END===") {
+				return result, nil
+			}
+		}
+	}
+}
+
+func searchFlash(portName, pattern string) (string, error) {
+	mode := &serial.Mode{
+		BaudRate: 115200,
+	}
+
+	port, err := serial.Open(portName, mode)
+	if err != nil {
+		return "", fmt.Errorf("failed to open port: %w", err)
+	}
+	defer port.Close()
+
+	// Clear any buffered data before sending command
+	time.Sleep(100 * time.Millisecond)
+	clearBuf := make([]byte, 4096)
+	port.SetReadTimeout(50 * time.Millisecond)
+	port.Read(clearBuf) // Discard any leftover data
+
+	// Send SEARCHFLASH command
+	command := fmt.Sprintf("SEARCHFLASH:%s\n", pattern)
+	_, err = port.Write([]byte(command))
+	if err != nil {
+		return "", fmt.Errorf("failed to write: %w", err)
+	}
+
+	// Read until we see ===END===
+	// Flash search can take a LONG time (4MB), so use a very long timeout
+	result := ""
+	buf := make([]byte, 1024)
+	startTime := time.Now()
+
+	for {
+		// Timeout after 120 seconds (Flash is much larger than SRAM)
+		if time.Since(startTime) > 120*time.Second {
 			if result == "" {
 				return "", fmt.Errorf("timeout: no response from Pico")
 			}

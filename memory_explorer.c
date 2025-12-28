@@ -65,14 +65,12 @@ void send_landmarks() {
     fflush(stdout);
 }
 
-void search_memory(uint8_t* pattern, size_t pattern_len) {
-    uint32_t start_addr = 0x20000000;
-    uint32_t end_addr = 0x20082000;  // 520KB SRAM
+void search_memory_region(uint32_t start_addr, uint32_t end_addr, const char* region_name, uint8_t* pattern, size_t pattern_len) {
     uint8_t* ptr = (uint8_t*)start_addr;
     uint32_t total_size = end_addr - start_addr;
     int found_count = 0;
 
-    printf("=== SEARCHING SRAM ===\n");
+    printf("=== SEARCHING %s ===\n", region_name);
     printf("Range: 0x%08x - 0x%08x (%u bytes)\n", start_addr, end_addr, total_size);
     printf("Pattern: ");
     for(size_t i = 0; i < pattern_len; i++) {
@@ -81,7 +79,7 @@ void search_memory(uint8_t* pattern, size_t pattern_len) {
     printf("(%zu bytes)\n\n", pattern_len);
     fflush(stdout);
 
-    // Search through SRAM
+    // Search through memory region
     for(uint32_t offset = 0; offset <= total_size - pattern_len; offset++) {
         bool match = true;
         for(size_t i = 0; i < pattern_len; i++) {
@@ -114,7 +112,19 @@ void search_memory(uint8_t* pattern, size_t pattern_len) {
         }
     }
 
-    printf("\nTotal matches: %d\n", found_count);
+    printf("Total matches in %s: %d\n\n", region_name, found_count);
+    fflush(stdout);
+}
+
+void search_memory(uint8_t* pattern, size_t pattern_len, bool search_flash, bool search_sram) {
+    if(search_flash) {
+        search_memory_region(0x10000000, 0x10400000, "FLASH", pattern, pattern_len);
+    }
+
+    if(search_sram) {
+        search_memory_region(0x20000000, 0x20082000, "SRAM", pattern, pattern_len);
+    }
+
     printf("===END===\n");
     fflush(stdout);
 }
@@ -138,7 +148,7 @@ void parse_command(char* cmd) {
         return;
     }
 
-    // Handle SEARCH command
+    // Handle SEARCH command (SRAM)
     // Format: SEARCH:DEADBEEF or SEARCH:42
     if(strcmp(token, "SEARCH") == 0) {
         token = strtok(NULL, ":");
@@ -171,7 +181,44 @@ void parse_command(char* cmd) {
             pattern[i] = (uint8_t)strtoul(hex_byte, NULL, 16);
         }
 
-        search_memory(pattern, pattern_len);
+        search_memory(pattern, pattern_len, false, true);  // SRAM only
+        return;
+    }
+
+    // Handle SEARCHFLASH command
+    // Format: SEARCHFLASH:DEADBEEF
+    if(strcmp(token, "SEARCHFLASH") == 0) {
+        token = strtok(NULL, ":");
+        if(token == NULL) {
+            printf("ERROR: Missing search pattern\n");
+            printf("Usage: SEARCHFLASH:HEXPATTERN\n");
+            printf("Example: SEARCHFLASH:48656C6C6F (search for 'Hello')\n");
+            fflush(stdout);
+            return;
+        }
+
+        // Parse hex pattern
+        size_t pattern_len = strlen(token);
+        if(pattern_len % 2 != 0) {
+            printf("ERROR: Hex pattern must have even number of digits\n");
+            fflush(stdout);
+            return;
+        }
+
+        pattern_len /= 2;  // Convert to byte length
+        if(pattern_len == 0 || pattern_len > 64) {
+            printf("ERROR: Pattern length must be 1-64 bytes (2-128 hex digits)\n");
+            fflush(stdout);
+            return;
+        }
+
+        uint8_t pattern[64];
+        for(size_t i = 0; i < pattern_len; i++) {
+            char hex_byte[3] = {token[i*2], token[i*2+1], '\0'};
+            pattern[i] = (uint8_t)strtoul(hex_byte, NULL, 16);
+        }
+
+        search_memory(pattern, pattern_len, true, false);  // Flash only
         return;
     }
 
@@ -259,13 +306,14 @@ int main() {
     
     printf("PicoPeeker ready!\n");
     printf("Commands:\n");
-    printf("  READ:0xADDRESS:LENGTH - Read memory\n");
-    printf("  SEARCH:HEXPATTERN     - Search SRAM for hex pattern\n");
-    printf("  LANDMARKS             - Show memory landmarks\n");
+    printf("  READ:0xADDRESS:LENGTH   - Read memory\n");
+    printf("  SEARCH:HEXPATTERN       - Search SRAM for hex pattern\n");
+    printf("  SEARCHFLASH:HEXPATTERN  - Search Flash for hex pattern\n");
+    printf("  LANDMARKS               - Show memory landmarks\n");
     printf("Examples:\n");
     printf("  READ:0x20000000:256\n");
-    printf("  SEARCH:2A000000 (search for int 42)\n");
-    printf("  SEARCH:DEADBEEF\n\n");
+    printf("  SEARCH:2A000000 (search for int 42 in SRAM)\n");
+    printf("  SEARCHFLASH:48656C6C6F (search for 'Hello' in Flash)\n\n");
     fflush(stdout);
 
     // Send landmarks on startup
