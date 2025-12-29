@@ -8,7 +8,7 @@ A header-only memory inspection library for Raspberry Pi Pico 2 (RP2350). Drop i
 
 ```bash
 cd your-pico-project/
-wget https://raw.githubusercontent.com/yourusername/picopeeker/main/picopeeker.h
+wget https://raw.githubusercontent.com/MironCo/picopeeker/refs/heads/main/picopeeker.h
 ```
 
 ### 2. Add to your code
