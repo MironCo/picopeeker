@@ -34,3 +34,9 @@ Thumbs.db
 
 # Pico SDK
 pico-sdk/
+
+# TFT Display (experimental)
+tft_display.c
+
+# TFT Game project
+tft-game/
