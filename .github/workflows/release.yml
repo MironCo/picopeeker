@@ -31,6 +31,8 @@ jobs:
       run: |
         mkdir -p ../release
         go build -ldflags="-s -w" -o ../release/picopeeker-gui-linux-amd64 main.go
+        chmod +x ../release/picopeeker-gui-linux-amd64
+        tar -czf ../release/picopeeker-gui-linux-amd64.tar.gz -C ../release picopeeker-gui-linux-amd64
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
