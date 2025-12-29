@@ -61,6 +61,10 @@ extern "C" {
 #define PICOPEEKER_MAX_SEARCH_RESULTS 100
 #endif
 
+#ifndef PICOPEEKER_LED_PIN
+#define PICOPEEKER_LED_PIN 25  // Default onboard LED
+#endif
+
 // Memory regions for Pico 2 (RP2350)
 #define PICOPEEKER_ROM_START      0x00000000
 #define PICOPEEKER_ROM_END        0x00004000
@@ -361,6 +365,11 @@ static void _picopeeker_parse_command(char* cmd) {
 }
 
 static void _picopeeker_core1_main(void) {
+    // Initialize LED
+    gpio_init(PICOPEEKER_LED_PIN);
+    gpio_set_dir(PICOPEEKER_LED_PIN, GPIO_OUT);
+    gpio_put(PICOPEEKER_LED_PIN, 0);
+
     printf("PicoPeeker ready!\n");
     printf("Commands:\n");
     printf("  READ:0xADDRESS:LENGTH   - Read memory\n");
@@ -384,8 +393,16 @@ static void _picopeeker_core1_main(void) {
                 // Command complete
                 if(_picopeeker_state.cmd_index > 0) {
                     _picopeeker_state.cmd_buffer[_picopeeker_state.cmd_index] = '\0';
+
+                    // Flash LED on
+                    gpio_put(PICOPEEKER_LED_PIN, 1);
+
                     _picopeeker_parse_command(_picopeeker_state.cmd_buffer);
                     _picopeeker_state.cmd_index = 0;
+
+                    // Flash LED off after command completes
+                    sleep_ms(100);
+                    gpio_put(PICOPEEKER_LED_PIN, 0);
                 }
             } else if(_picopeeker_state.cmd_index < PICOPEEKER_CMD_BUFFER_SIZE - 1) {
                 _picopeeker_state.cmd_buffer[_picopeeker_state.cmd_index++] = (char)c;
