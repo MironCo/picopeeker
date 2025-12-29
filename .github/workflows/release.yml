@@ -1,0 +1,90 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Desktop App
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build for Linux
+      working-directory: desktop-app
+      run: |
+        mkdir -p ../release
+        go build -o ../release/picopeeker-gui-linux-amd64 main.go
+
+    - name: Build for Windows
+      working-directory: desktop-app
+      run: |
+        GOOS=windows GOARCH=amd64 go build -o ../release/picopeeker-gui-windows-amd64.exe main.go
+
+    - name: Build for macOS (Intel)
+      working-directory: desktop-app
+      run: |
+        GOOS=darwin GOARCH=amd64 go build -o ../release/picopeeker-gui-macos-amd64 main.go
+
+    - name: Build for macOS (Apple Silicon)
+      working-directory: desktop-app
+      run: |
+        GOOS=darwin GOARCH=arm64 go build -o ../release/picopeeker-gui-macos-arm64 main.go
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/picopeeker-gui-linux-amd64
+          release/picopeeker-gui-windows-amd64.exe
+          release/picopeeker-gui-macos-amd64
+          release/picopeeker-gui-macos-arm64
+          picopeeker.h
+        body: |
+          ## PicoPeeker ${{ steps.get_version.outputs.VERSION }}
+
+          ### Installation
+
+          **Header-only library:**
+          ```bash
+          wget https://raw.githubusercontent.com/MironCo/picopeeker/refs/heads/main/picopeeker.h
+          ```
+
+          **Desktop GUI:**
+          Download the appropriate binary for your platform below.
+
+          ### Platforms
+          - `picopeeker-gui-linux-amd64` - Linux (x64)
+          - `picopeeker-gui-windows-amd64.exe` - Windows (x64)
+          - `picopeeker-gui-macos-amd64` - macOS Intel
+          - `picopeeker-gui-macos-arm64` - macOS Apple Silicon
+
+          ### Usage
+          1. Add `picopeeker.h` to your Pico project
+          2. Include and call `picopeeker_start()` in your code
+          3. Add `pico_multicore` to your CMakeLists.txt
+          4. Run the desktop GUI to inspect memory
+
+          See the [README](https://github.com/MironCo/picopeeker) for full documentation.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -102,7 +102,7 @@ cd desktop-app
 go build -o bin/picopeeker-gui main.go
 ```
 
-Or download pre-built binaries from the [Releases](https://github.com/yourusername/picopeeker/releases) page.
+Or download pre-built binaries from the [Releases](https://github.com/MironCo/picopeeker/releases) page.
 
 ### Prerequisites
 
