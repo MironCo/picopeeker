@@ -30,7 +30,7 @@ jobs:
         go build -ldflags="-s -w" -o ../release/picopeeker-gui-linux-amd64 main.go
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: linux-binary
         path: release/picopeeker-gui-linux-amd64
@@ -54,7 +54,7 @@ jobs:
         go build -ldflags="-s -w" -o ../release/picopeeker-gui-windows-amd64.exe main.go
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: windows-binary
         path: release/picopeeker-gui-windows-amd64.exe
@@ -83,13 +83,13 @@ jobs:
         GOARCH=arm64 go build -ldflags="-s -w" -o ../release/picopeeker-gui-macos-arm64 main.go
 
     - name: Upload Intel artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: macos-intel-binary
         path: release/picopeeker-gui-macos-amd64
 
     - name: Upload ARM artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: macos-arm-binary
         path: release/picopeeker-gui-macos-arm64
@@ -107,7 +107,7 @@ jobs:
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
