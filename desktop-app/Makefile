@@ -2,11 +2,11 @@
 
 # Build the application
 build:
-	go build -o bin/desktop-app main.go
+	go build -o bin/desktop-app ./cmd/picopeeker
 
 # Run the application
 run:
-	go run main.go
+	go run ./cmd/picopeeker
 
 # Clean build artifacts
 clean:
@@ -20,7 +20,7 @@ install:
 # Build for release (optimized)
 release:
 	mkdir -p bin
-	go build -ldflags="-s -w" -o bin/desktop-app main.go
+	go build -ldflags="-s -w" -o bin/desktop-app ./cmd/picopeeker
 
 # Run tests (if you add tests later)
 test:
