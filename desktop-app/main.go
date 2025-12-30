@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -98,6 +99,10 @@ func main() {
 	lengthEntry.SetPlaceHolder("256")
 	lengthEntry.SetText("256")
 
+	// Display format selector
+	displayFormatSelect := widget.NewSelect([]string{"Bytes (Hex)", "16-bit Words", "32-bit Words", "Float (32-bit)"}, nil)
+	displayFormatSelect.SetSelected("Bytes (Hex)")
+
 	// Channel for background operations
 	type uiUpdate struct {
 		text string
@@ -159,7 +164,10 @@ func main() {
 			if err != nil {
 				updateChan <- uiUpdate{text: fmt.Sprintf("Error: %v", err)}
 			} else {
-				updateChan <- uiUpdate{text: result}
+				// Format output based on selected display mode
+				displayMode := displayFormatSelect.Selected
+				formatted := formatMemoryDump(result, displayMode)
+				updateChan <- uiUpdate{text: formatted}
 			}
 		}()
 	})
@@ -239,11 +247,20 @@ func main() {
 
 	addressRow := container.NewBorder(nil, nil, widget.NewLabel("Address:"), container.NewHBox(decrementBtn, incrementBtn), addressEntry)
 	lengthRow := container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, lengthEntry)
+	displayFormatRow := container.NewBorder(nil, nil, widget.NewLabel("Display as:"), nil, displayFormatSelect)
 
-	readTab := container.NewVBox(
+	// Wrap form fields in a card with extra padding
+	memorySettingsCard := widget.NewCard("", "", container.NewPadded(container.NewVBox(
 		addressRow,
 		lengthRow,
-		container.NewHBox(widget.NewLabel("Quick:"), romBtn, flashBtn, sramBtn, gpioBtn),
+		displayFormatRow,
+	)))
+
+	readTab := container.NewVBox(
+		memorySettingsCard,
+		widget.NewCard("", "", container.NewPadded(
+			container.NewHBox(widget.NewLabel("Quick Access:"), romBtn, flashBtn, sramBtn, gpioBtn),
+		)),
 		// dumpRomBtn,
 		readMemoryBtn,
 	)
@@ -351,11 +368,18 @@ func main() {
 	searchPatternRow := container.NewBorder(nil, nil, widget.NewLabel("Pattern:"), nil, searchEntry)
 	searchRegionRow := container.NewBorder(nil, nil, widget.NewLabel("Region:"), nil, searchRegionSelect)
 
-	searchTab := container.NewVBox(
+	// Wrap search settings in a card with extra padding
+	searchSettingsCard := widget.NewCard("", "", container.NewPadded(container.NewVBox(
 		searchTypeRow,
 		searchPatternRow,
 		searchRegionRow,
-		widget.NewLabel("SRAM: Runtime data (520KB) | Flash: String literals (4MB)"),
+	)))
+
+	searchTab := container.NewVBox(
+		searchSettingsCard,
+		widget.NewCard("", "", container.NewPadded(
+			widget.NewLabel("SRAM: Runtime data (520KB) | Flash: String literals (4MB)"),
+		)),
 		searchBtn,
 	)
 
@@ -377,7 +401,7 @@ func main() {
 	)
 
 	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(900, 700))
+	myWindow.Resize(fyne.NewSize(900, 850))
 	myWindow.ShowAndRun()
 }
 
@@ -664,4 +688,141 @@ func searchFlash(portName, pattern string) (string, error) {
 			}
 		}
 	}
+}
+
+// formatMemoryDump reformats the hex dump based on the selected display mode
+func formatMemoryDump(rawDump string, displayMode string) string {
+	// If not in bytes mode, we need to parse and reformat
+	if displayMode == "Bytes (Hex)" {
+		return rawDump // Return original format
+	}
+
+	// Parse the hex dump to extract bytes
+	bytes := parseHexDump(rawDump)
+	if len(bytes) == 0 {
+		return rawDump // Return original if parsing failed
+	}
+
+	// Extract starting address from the dump
+	startAddr := extractStartAddress(rawDump)
+
+	// Format based on display mode
+	switch displayMode {
+	case "16-bit Words":
+		return formatAs16BitWords(bytes, startAddr)
+	case "32-bit Words":
+		return formatAs32BitWords(bytes, startAddr)
+	case "Float (32-bit)":
+		return formatAsFloats(bytes, startAddr)
+	default:
+		return rawDump
+	}
+}
+
+// extractStartAddress extracts the starting address from the hex dump
+func extractStartAddress(dump string) uint32 {
+	lines := strings.Split(dump, "\n")
+	for _, line := range lines {
+		// Look for "Address: 0x12345678"
+		if strings.Contains(line, "Address:") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "Address:" && i+1 < len(fields) {
+					addr := strings.TrimSuffix(fields[i+1], ",")
+					var val uint64
+					fmt.Sscanf(addr, "0x%x", &val)
+					return uint32(val)
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// formatAs16BitWords formats bytes as 16-bit words (little-endian)
+func formatAs16BitWords(bytes []byte, startAddr uint32) string {
+	var sb strings.Builder
+	sb.WriteString("=== 16-bit Word View (Little-Endian) ===\n\n")
+	sb.WriteString("Address:  Hex Bytes  Value      Decimal\n")
+	sb.WriteString("--------  ---------  ------     --------\n")
+
+	for i := 0; i+1 < len(bytes); i += 2 {
+		addr := startAddr + uint32(i)
+		val := binary.LittleEndian.Uint16(bytes[i : i+2])
+		sb.WriteString(fmt.Sprintf("%08x: %02x %02x     0x%04x     %d\n",
+			addr, bytes[i], bytes[i+1], val, int16(val)))
+	}
+
+	// Handle odd byte at end if present
+	if len(bytes)%2 == 1 {
+		i := len(bytes) - 1
+		addr := startAddr + uint32(i)
+		sb.WriteString(fmt.Sprintf("%08x: %02x        0x%02x       %d (partial)\n",
+			addr, bytes[i], bytes[i], int8(bytes[i])))
+	}
+
+	sb.WriteString("\n===END===\n")
+	return sb.String()
+}
+
+// formatAs32BitWords formats bytes as 32-bit words (little-endian)
+func formatAs32BitWords(bytes []byte, startAddr uint32) string {
+	var sb strings.Builder
+	sb.WriteString("=== 32-bit Word View (Little-Endian) ===\n\n")
+	sb.WriteString("Address:  Hex Bytes        Value       Decimal (signed)  Decimal (unsigned)\n")
+	sb.WriteString("--------  ---------------  ----------  ----------------  ------------------\n")
+
+	for i := 0; i+3 < len(bytes); i += 4 {
+		addr := startAddr + uint32(i)
+		val := binary.LittleEndian.Uint32(bytes[i : i+4])
+		sb.WriteString(fmt.Sprintf("%08x: %02x %02x %02x %02x  0x%08x  %-16d  %d\n",
+			addr, bytes[i], bytes[i+1], bytes[i+2], bytes[i+3],
+			val, int32(val), val))
+	}
+
+	// Handle remaining bytes if not aligned to 4
+	remainder := len(bytes) % 4
+	if remainder > 0 {
+		i := len(bytes) - remainder
+		addr := startAddr + uint32(i)
+		sb.WriteString(fmt.Sprintf("%08x: ", addr))
+		for j := 0; j < remainder; j++ {
+			sb.WriteString(fmt.Sprintf("%02x ", bytes[i+j]))
+		}
+		sb.WriteString("(partial word)\n")
+	}
+
+	sb.WriteString("\n===END===\n")
+	return sb.String()
+}
+
+// formatAsFloats formats bytes as 32-bit floats (little-endian)
+func formatAsFloats(bytes []byte, startAddr uint32) string {
+	var sb strings.Builder
+	sb.WriteString("=== Float View (32-bit, Little-Endian) ===\n\n")
+	sb.WriteString("Address:  Hex Bytes        Float Value\n")
+	sb.WriteString("--------  ---------------  -----------\n")
+
+	for i := 0; i+3 < len(bytes); i += 4 {
+		addr := startAddr + uint32(i)
+		bits := binary.LittleEndian.Uint32(bytes[i : i+4])
+		floatVal := *(*float32)(unsafe.Pointer(&bits))
+		sb.WriteString(fmt.Sprintf("%08x: %02x %02x %02x %02x  %f\n",
+			addr, bytes[i], bytes[i+1], bytes[i+2], bytes[i+3], floatVal))
+	}
+
+	// Handle remaining bytes if not aligned to 4
+	remainder := len(bytes) % 4
+	if remainder > 0 {
+		i := len(bytes) - remainder
+		addr := startAddr + uint32(i)
+		sb.WriteString(fmt.Sprintf("%08x: ", addr))
+		for j := 0; j < remainder; j++ {
+			sb.WriteString(fmt.Sprintf("%02x ", bytes[i+j]))
+		}
+		sb.WriteString("(partial float)\n")
+	}
+
+	sb.WriteString("\n===END===\n")
+	return sb.String()
 }
