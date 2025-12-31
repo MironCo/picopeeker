@@ -66,8 +66,9 @@ func main() {
 	// Build tabs
 	readTab := ui.BuildReadMemoryTab(portEntry, output, updateChan)
 	searchTab := ui.BuildSearchMemoryTab(portEntry, output, updateChan)
+	monitorTab := ui.BuildMonitorTab(portEntry, output, updateChan)
 
-	tabs := container.NewAppTabs(readTab, searchTab)
+	tabs := container.NewAppTabs(readTab, searchTab, monitorTab)
 
 	// Main layout
 	portRow := container.NewBorder(nil, nil, widget.NewLabel("Serial Port:"), connectBtn, portEntry)

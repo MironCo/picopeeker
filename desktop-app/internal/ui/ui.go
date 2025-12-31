@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -262,4 +263,182 @@ func BuildSearchMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateC
 // UIUpdate is a message type for updating the UI from background goroutines
 type UIUpdate struct {
 	Text string
+}
+
+// BuildMonitorTab creates the Monitor Memory tab UI for real-time updates
+func BuildMonitorTab(portEntry *widget.Entry, output *widget.Entry, updateChan chan UIUpdate) *container.TabItem {
+	addressEntry := widget.NewEntry()
+	addressEntry.SetPlaceHolder("0x20000000")
+	addressEntry.SetText("0x20000000")
+
+	decrementBtn := widget.NewButton("-", func() {
+		address := addressEntry.Text
+		if address == "" {
+			return
+		}
+		val := uint64(0)
+		fmt.Sscanf(address, "0x%x", &val)
+		if val >= 256 {
+			val -= 256
+		}
+		addressEntry.SetText(fmt.Sprintf("0x%08x", val))
+	})
+
+	incrementBtn := widget.NewButton("+", func() {
+		address := addressEntry.Text
+		if address == "" {
+			return
+		}
+		val := uint64(0)
+		fmt.Sscanf(address, "0x%x", &val)
+		val += 256
+		addressEntry.SetText(fmt.Sprintf("0x%08x", val))
+	})
+
+	lengthEntry := widget.NewEntry()
+	lengthEntry.SetPlaceHolder("256")
+	lengthEntry.SetText("256")
+
+	// Display format selector
+	displayFormatSelect := widget.NewSelect([]string{"Bytes (Hex)", "16-bit Words", "32-bit Words", "Float (32-bit)"}, nil)
+	displayFormatSelect.SetSelected("Bytes (Hex)")
+
+	// Refresh rate selector
+	refreshRateSelect := widget.NewSelect([]string{"100ms (10 Hz)", "250ms (4 Hz)", "500ms (2 Hz)", "1000ms (1 Hz)"}, nil)
+	refreshRateSelect.SetSelected("250ms (4 Hz)")
+
+	// Monitoring state
+	var stopMonitoring chan bool
+	isMonitoring := false
+
+	statusLabel := widget.NewLabel("Status: Stopped")
+
+	var startStopBtn *widget.Button
+	startStopBtn = widget.NewButton("Start Monitoring", func() {
+		if isMonitoring {
+			// Stop monitoring
+			if stopMonitoring != nil {
+				close(stopMonitoring)
+				stopMonitoring = nil
+			}
+			isMonitoring = false
+			startStopBtn.SetText("Start Monitoring")
+			statusLabel.SetText("Status: Stopped")
+			startStopBtn.Importance = widget.HighImportance
+		} else {
+			// Start monitoring
+			portName := portEntry.Text
+			address := addressEntry.Text
+			length := lengthEntry.Text
+
+			if portName == "" {
+				output.SetText("Error: Please enter a port name")
+				return
+			}
+			if address == "" {
+				output.SetText("Error: Please enter an address")
+				return
+			}
+			if length == "" {
+				output.SetText("Error: Please enter a length")
+				return
+			}
+
+			// Validate address format
+			address = strings.TrimSpace(address)
+			if !strings.HasPrefix(address, "0x") && !strings.HasPrefix(address, "0X") {
+				output.SetText("Error: Address must start with 0x (e.g., 0x20000000)")
+				return
+			}
+			if _, err := strconv.ParseUint(address[2:], 16, 32); err != nil {
+				output.SetText("Error: Invalid hex address. Use format like 0x20000000")
+				return
+			}
+
+			// Validate length
+			lengthVal, err := strconv.Atoi(length)
+			if err != nil || lengthVal <= 0 || lengthVal > 4096 {
+				output.SetText("Error: Length must be a number between 1 and 4096")
+				return
+			}
+
+			// Parse refresh rate
+			refreshRate := 250 // default
+			switch refreshRateSelect.Selected {
+			case "100ms (10 Hz)":
+				refreshRate = 100
+			case "250ms (4 Hz)":
+				refreshRate = 250
+			case "500ms (2 Hz)":
+				refreshRate = 500
+			case "1000ms (1 Hz)":
+				refreshRate = 1000
+			}
+
+			// Start monitoring goroutine
+			stopMonitoring = make(chan bool)
+			isMonitoring = true
+			startStopBtn.SetText("Stop Monitoring")
+			statusLabel.SetText(fmt.Sprintf("Status: Monitoring (%dms refresh)", refreshRate))
+			startStopBtn.Importance = widget.DangerImportance
+
+			go func(addr, len, port string, rate int, stopChan chan bool, dispMode string) {
+				ticker := time.NewTicker(time.Duration(rate) * time.Millisecond)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-stopChan:
+						return
+					case <-ticker.C:
+						result, err := serial.ReadMemory(port, addr, len)
+						if err != nil {
+							updateChan <- UIUpdate{Text: fmt.Sprintf("Error: %v", err)}
+						} else {
+							formatted := format.FormatMemoryDump(result, dispMode)
+							updateChan <- UIUpdate{Text: formatted}
+						}
+					}
+				}
+			}(address, length, portName, refreshRate, stopMonitoring, displayFormatSelect.Selected)
+		}
+	})
+	startStopBtn.Importance = widget.HighImportance
+
+	romBtn := widget.NewButton("ROM", func() {
+		addressEntry.SetText("0x00000000")
+	})
+	flashBtn := widget.NewButton("Flash", func() {
+		addressEntry.SetText("0x10000000")
+	})
+	sramBtn := widget.NewButton("SRAM", func() {
+		addressEntry.SetText("0x20000000")
+	})
+	gpioBtn := widget.NewButton("GPIO", func() {
+		addressEntry.SetText("0x40028000")
+	})
+
+	addressRow := container.NewBorder(nil, nil, widget.NewLabel("Address:"), container.NewHBox(decrementBtn, incrementBtn), addressEntry)
+	lengthRow := container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, lengthEntry)
+	displayFormatRow := container.NewBorder(nil, nil, widget.NewLabel("Display as:"), nil, displayFormatSelect)
+	refreshRateRow := container.NewBorder(nil, nil, widget.NewLabel("Refresh Rate:"), nil, refreshRateSelect)
+
+	// Wrap form fields in a card with extra padding
+	monitorSettingsCard := widget.NewCard("", "", container.NewPadded(container.NewVBox(
+		addressRow,
+		lengthRow,
+		displayFormatRow,
+		refreshRateRow,
+	)))
+
+	monitorTab := container.NewVBox(
+		monitorSettingsCard,
+		widget.NewCard("", "", container.NewPadded(
+			container.NewHBox(widget.NewLabel("Quick Access:"), romBtn, flashBtn, sramBtn, gpioBtn),
+		)),
+		startStopBtn,
+		statusLabel,
+	)
+
+	return container.NewTabItem("Monitor Memory", monitorTab)
 }
