@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(PICO_BOARD pico2)
+# Set PICO_BOARD to either "pico" (Pico 1/RP2040) or "pico2" (Pico 2/RP2350)
+# Override with: cmake -DPICO_BOARD=pico ..
+if(NOT DEFINED PICO_BOARD)
+    set(PICO_BOARD pico2)  # Default to Pico 2
+endif()
+
+message(STATUS "Building for: ${PICO_BOARD}")
 
 include(pico_sdk_import.cmake)
 

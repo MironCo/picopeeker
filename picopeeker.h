@@ -65,13 +65,23 @@ extern "C" {
 #define PICOPEEKER_LED_PIN 25  // Default onboard LED
 #endif
 
-// Memory regions for Pico 2 (RP2350)
+// Memory regions - automatically configured for RP2040 (Pico 1) or RP2350 (Pico 2)
 #define PICOPEEKER_ROM_START      0x00000000
 #define PICOPEEKER_ROM_END        0x00004000
 #define PICOPEEKER_FLASH_START    0x10000000
+
+#ifdef PICO_RP2040
+// Raspberry Pi Pico 1 (RP2040) - 264KB SRAM, 2MB Flash
+#define PICOPEEKER_FLASH_END      0x10200000  // 2MB
+#define PICOPEEKER_SRAM_START     0x20000000
+#define PICOPEEKER_SRAM_END       0x20042000  // 264KB
+#else
+// Raspberry Pi Pico 2 (RP2350) - 520KB SRAM, 4MB Flash
 #define PICOPEEKER_FLASH_END      0x10400000  // 4MB
 #define PICOPEEKER_SRAM_START     0x20000000
 #define PICOPEEKER_SRAM_END       0x20082000  // 520KB
+#endif
+
 #define PICOPEEKER_PERIPH_START   0x40000000
 #define PICOPEEKER_PERIPH_END     0x60000000
 
