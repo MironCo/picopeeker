@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"desktop-app/internal/config"
 	"desktop-app/internal/format"
 	"desktop-app/internal/serial"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 )
 
 // BuildReadMemoryTab creates the Read Memory tab UI
-func BuildReadMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateChan chan UIUpdate) *container.TabItem {
+func BuildReadMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateChan chan UIUpdate, getModel func() config.PicoModel) *container.TabItem {
 	addressEntry := widget.NewEntry()
 	addressEntry.SetPlaceHolder("0x20000000")
 	addressEntry.SetText("0x20000000")
@@ -138,7 +139,7 @@ func BuildReadMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateCha
 }
 
 // BuildSearchMemoryTab creates the Search Memory tab UI
-func BuildSearchMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateChan chan UIUpdate) *container.TabItem {
+func BuildSearchMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateChan chan UIUpdate, getModel func() config.PicoModel) *container.TabItem {
 	searchEntry := widget.NewEntry()
 	searchEntry.SetPlaceHolder("Enter pattern...")
 	searchEntry.SetText("")
@@ -248,11 +249,17 @@ func BuildSearchMemoryTab(portEntry *widget.Entry, output *widget.Entry, updateC
 		searchRegionRow,
 	)))
 
+	// Info label that updates based on selected model
+	infoLabel := widget.NewLabel("")
+	updateInfoLabel := func() {
+		regions := config.GetMemoryRegions(getModel())
+		infoLabel.SetText(fmt.Sprintf("SRAM: Runtime data (%s) | Flash: String literals (%s)", regions.SRAMSize, regions.FlashSize))
+	}
+	updateInfoLabel() // Set initial value
+
 	searchTab := container.NewVBox(
 		searchSettingsCard,
-		widget.NewCard("", "", container.NewPadded(
-			widget.NewLabel("SRAM: Runtime data (520KB) | Flash: String literals (4MB)"),
-		)),
+		widget.NewCard("", "", container.NewPadded(infoLabel)),
 		searchBtn,
 	)
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"desktop-app/internal/config"
 	"desktop-app/internal/serial"
 	"desktop-app/internal/ui"
 	"desktop-app/internal/util"
@@ -13,6 +14,7 @@ import (
 )
 
 var landmarksLabel *widget.Label
+var currentModel config.PicoModel = config.Pico2
 
 func main() {
 	myApp := app.New()
@@ -28,6 +30,14 @@ func main() {
 	defaultPort := util.FindUSBModemPort()
 	portEntry.SetPlaceHolder(defaultPort)
 	portEntry.SetText(defaultPort)
+
+	// Pico model selector
+	modelSelect := widget.NewSelect([]string{"Pico 1 (RP2040)", "Pico 2 (RP2350)"}, func(selected string) {
+		currentModel = config.GetModelFromString(selected)
+		regions := config.GetMemoryRegions(currentModel)
+		output.SetText(fmt.Sprintf("Model changed to %s\nSRAM: %s | Flash: %s", selected, regions.SRAMSize, regions.FlashSize))
+	})
+	modelSelect.SetSelected("Pico 2 (RP2350)")
 
 	// Landmarks label (shared across tabs)
 	landmarksLabel = widget.NewLabel("Landmarks: Not connected")
@@ -63,17 +73,19 @@ func main() {
 		}
 	}()
 
-	// Build tabs
-	readTab := ui.BuildReadMemoryTab(portEntry, output, updateChan)
-	searchTab := ui.BuildSearchMemoryTab(portEntry, output, updateChan)
+	// Build tabs - pass function to get current model
+	getModel := func() config.PicoModel { return currentModel }
+	readTab := ui.BuildReadMemoryTab(portEntry, output, updateChan, getModel)
+	searchTab := ui.BuildSearchMemoryTab(portEntry, output, updateChan, getModel)
 
 	tabs := container.NewAppTabs(readTab, searchTab)
 
 	// Main layout
 	portRow := container.NewBorder(nil, nil, widget.NewLabel("Serial Port:"), connectBtn, portEntry)
+	modelRow := container.NewBorder(nil, nil, widget.NewLabel("Pico Model:"), nil, modelSelect)
 
 	content := container.NewBorder(
-		container.NewVBox(portRow, tabs),
+		container.NewVBox(portRow, modelRow, tabs),
 		landmarksLabel,
 		nil,
 		nil,

@@ -1,6 +1,6 @@
 # PicoPeeker
 
-A header-only memory inspection library for Raspberry Pi Pico 2 (RP2350). Drop into any project to debug memory in real-time via a desktop GUI.
+A header-only memory inspection library for Raspberry Pi Pico (RP2040) and Pico 2 (RP2350). Drop into any project to debug memory in real-time via a desktop GUI.
 
 ## Quick Start
 
@@ -61,14 +61,27 @@ PicoPeeker responds to these serial commands:
 
 ## Hardware Requirements
 
+### Supported Boards
+
+- **Raspberry Pi Pico 1** (RP2040)
+  - 264KB SRAM, 2MB Flash
+  - Dual Cortex-M0+ cores
+
 - **Raspberry Pi Pico 2** (RP2350)
-  - 520KB SRAM
+  - 520KB SRAM, 4MB Flash
   - Dual Cortex-M33 cores OR dual RISC-V Hazard3 cores
 
-> **Note**: Designed for Pico 2 (RP2350). Not compatible with original Pico (RP2040) due to different memory sizes and single-core architecture.
+> **Note**: Both Pico 1 and Pico 2 are fully supported! The library automatically detects the target board and adjusts memory regions accordingly.
 
-## Memory Map (RP2350)
+## Memory Maps
 
+### RP2040 (Pico 1)
+- **ROM**: `0x00000000 - 0x00003FFF` (16KB)
+- **Flash**: `0x10000000 - 0x101FFFFF` (2MB)
+- **SRAM**: `0x20000000 - 0x20041FFF` (264KB)
+- **Peripherals**: `0x40000000 - 0x5FFFFFFF`
+
+### RP2350 (Pico 2)
 - **ROM**: `0x00000000 - 0x00003FFF` (16KB)
 - **Flash**: `0x10000000 - 0x103FFFFF` (4MB)
 - **SRAM**: `0x20000000 - 0x20081FFF` (520KB)
@@ -133,10 +146,19 @@ Or download pre-built binaries from the [Releases](https://github.com/MironCo/pi
 See [example.c](example.c) for a minimal integration example. Build it:
 
 ```bash
+# Build for Pico 2 (default)
 ./build.sh
+
+# Or build for Pico 1
+./build.sh -1
+
+# Or build for Pico 2 (explicit)
+./build.sh -2
 ```
 
 Flash `build/picopeeker_example.uf2` to your Pico, then connect the desktop GUI.
+
+**Note**: The desktop GUI includes a dropdown to select whether you're using Pico 1 or Pico 2, which adjusts the memory region sizes in the UI.
 
 ## Notes on Race Conditions
 
