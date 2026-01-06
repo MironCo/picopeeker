@@ -1,10 +1,10 @@
 package main
 
 import (
-	"desktop-app/internal/config"
-	"desktop-app/internal/serial"
-	"desktop-app/internal/ui"
-	"desktop-app/internal/util"
+	"github.com/MironCo/picopeeker/internal/config"
+	"github.com/MironCo/picopeeker/internal/serial"
+	"github.com/MironCo/picopeeker/internal/ui"
+	"github.com/MironCo/picopeeker/internal/util"
 	"fmt"
 
 	"fyne.io/fyne/v2"

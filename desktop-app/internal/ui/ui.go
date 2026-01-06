@@ -1,9 +1,9 @@
 package ui
 
 import (
-	"desktop-app/internal/config"
-	"desktop-app/internal/format"
-	"desktop-app/internal/serial"
+	"github.com/MironCo/picopeeker/internal/config"
+	"github.com/MironCo/picopeeker/internal/format"
+	"github.com/MironCo/picopeeker/internal/serial"
 	"fmt"
 	"strconv"
 	"strings"

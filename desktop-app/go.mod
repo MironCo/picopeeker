@@ -1,4 +1,4 @@
-module desktop-app
+module github.com/MironCo/picopeeker
 
 go 1.25.5
 
